@@ -1,3 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Sort a member of Congress's posts on X into outrage, legislative work, district focus and more, then chart the mix, its trend and what gets engagement.">
+<title>Congressional Tweet Audit</title>
+<style>
+/* The same base a claude.ai artifact gets, so the page renders alike in both places. */
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+</head>
+<!-- Everything between <body> and </body> is the page as published to claude.ai. -->
+<body>
 <title>Congressional Tweet Audit</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -656,6 +673,11 @@ function cap(name){
 }
 var sampleP = cap('sample');
 var dlP = cap('downloads');
+// No window.claude means a plain web page (GitHub Pages, a local file): no Claude, but ordinary downloads work.
+var standalone = !window.claude;
+var NO_CLAUDE = standalone
+  ? 'Labeling with Claude works when this page is opened inside claude.ai. Here you can label posts by hand in the list below.'
+  : 'Claude isn’t available in this view, so labeling is off. You can still label posts by hand in the list below.';
 var claudeState = 'pending'; // pending | ready | none
 var dl = null;
 
@@ -903,7 +925,7 @@ async function runLabel(mode){
   var sample = await sampleP;
   if (!sample) {
     running = false; lockUI(false); claudeState = 'none'; renderLabelStep();
-    setLabelMsg('Claude isn’t available in this view. You can still label posts by hand in the list.', true);
+    setLabelMsg(NO_CLAUDE, true);
     return;
   }
   ctl = new AbortController();
@@ -980,7 +1002,7 @@ function renderMast(){
   var dates = state.tweets.map(function(t){ return t.date; }).filter(Boolean).sort();
   $('#m-range').textContent = dates.length ? fmtRange(dates[0], dates[dates.length - 1]) : '';
   $('#sample-badge').hidden = !state.sample;
-  $('#export-btn').hidden = !dl || !labeled;
+  $('#export-btn').hidden = !(dl || standalone) || !labeled;
   $('#copy-btn').disabled = !labeled;
 }
 function renderCats(){
@@ -1054,7 +1076,7 @@ function renderLabelStep(){
   btn.textContent = missing ? 'Label ' + plural(missing, 'post') + ' with Claude'
                             : 'Re-label ' + (state.sample ? 'the ' + plural(all, 'sample post') : 'all ' + plural(all, 'post'));
   btn.disabled = !n || claudeState === 'none';
-  if (claudeState === 'none') cost.textContent = 'Claude isn’t available in this view, so labeling is off. You can still label posts by hand in the list.';
+  if (claudeState === 'none') cost.textContent = NO_CLAUDE;
   else cost.textContent = n ? 'Uses your Claude plan: about ' + plural(Math.ceil(n / BATCH), 'request') + '.' + (!missing ? ' Posts you labeled by hand keep your label.' : '') : '';
   $('#tier').value = state.tier;
 }
@@ -1608,9 +1630,16 @@ $('#copy-btn').addEventListener('click', function(){
   });
 });
 $('#export-btn').addEventListener('click', function(){
-  if (!dl) return;
   var slug = (state.member.name.trim() || 'member').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'member';
-  dl.save({filename:slug + '-tweet-audit.csv', data:toCSV()}).then(function(r){
+  var filename = slug + '-tweet-audit.csv';
+  if (!dl) {
+    if (!standalone) return;
+    var a = h('a', {href:URL.createObjectURL(new Blob([toCSV()], {type:'text/csv;charset=utf-8'})), download:filename, hidden:true});
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+    return;
+  }
+  dl.save({filename:filename, data:toCSV()}).then(function(r){
     if (r && r.status === 'saved') toast('CSV saved');
   }, function(e){
     var code = e && e.code;
@@ -1640,3 +1669,5 @@ syncInputs();
 renderAll();
 })();
 </script>
+</body>
+</html>
