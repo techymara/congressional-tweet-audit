@@ -109,7 +109,7 @@ a{color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--rule);border-radius:var(--r);overflow:hidden;background:var(--bg);flex-wrap:wrap}
 .seg button{font:600 13px/1 var(--f-ui);padding:8px 11px;border:0;background:transparent;color:var(--ink-2);cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
-input[type="text"],input[type="search"],textarea,select{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);padding:8px 10px;width:100%}
+input[type="text"],input[type="search"],input[type="password"],textarea,select{font:inherit;font-size:14px;color:var(--ink);background:var(--bg);border:1px solid var(--rule);border-radius:var(--r);padding:8px 10px;width:100%}
 textarea{resize:vertical;min-height:112px;font:12.5px/1.5 var(--f-mono)}
 .field{display:grid;gap:5px;font-size:13px;font-weight:600;color:var(--ink-2)}
 .hint{font-size:13px;color:var(--muted);line-height:1.45}
@@ -154,6 +154,7 @@ details.help ul{margin:8px 0 0;padding-left:18px;display:grid;gap:6px;font-size:
 .sw{display:inline-block;width:10px;height:10px;border-radius:2px;flex:none}
 .sw.off{background:transparent;box-shadow:inset 0 0 0 1.5px var(--axis)}
 .custom-form{display:grid;gap:8px;margin-top:8px}
+.api-block{display:grid;gap:10px}
 .progress{height:6px;border-radius:3px;background:var(--sunken);overflow:hidden}
 .progress span{display:block;height:100%;background:var(--accent);width:0}
 @media (prefers-reduced-motion:no-preference){.progress span{transition:width .35s ease}}
@@ -306,9 +307,9 @@ td .sw{margin-right:8px;vertical-align:-1px}
             <summary>Where to get a member’s posts</summary>
             <ul>
               <li>Copy posts from the member’s profile on x.com and paste them above, one per line.</li>
-              <li>Upload a CSV from any tweet-export tool. The page looks for columns named like text, date, likes and retweets.</li>
+              <li>Pull posts with the official X API (paid per post) and upload the JSON or CSV you save. The page looks for fields named like text, date, likes and retweets.</li>
               <li>Upload <code>tweets.js</code> from an X data archive (only for an account you control).</li>
-              <li>Save results from the X API as JSON and upload the file.</li>
+              <li>Skip scraper tools and unofficial “Twitter APIs”. X’s terms ban scraping.</li>
             </ul>
           </details>
           <button class="linkish" id="sample-btn" type="button">Load the fictional sample</button>
@@ -337,6 +338,13 @@ td .sw{margin-right:8px;vertical-align:-1px}
 
       <section class="step">
         <h2><span class="num">4</span>Label with Claude</h2>
+        <div class="api-block" id="api-block" hidden>
+          <label class="field" for="api-key">Anthropic API key
+            <input type="password" id="api-key" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+          </label>
+          <label class="check" for="api-remember"><input type="checkbox" id="api-remember"> Remember the key on this device</label>
+          <p class="hint">On this website, labeling runs on your own Anthropic API key. Your browser sends it only to Anthropic, and it’s forgotten when you close the tab unless you tick Remember. Create a key with a spend limit in the <a href="https://console.anthropic.com/" target="_blank" rel="noopener">Anthropic Console</a>.</p>
+        </div>
         <label class="field" for="tier">Model
           <select id="tier">
             <option value="quick">Fast</option>
@@ -449,7 +457,7 @@ td .sw{margin-right:8px;vertical-align:-1px}
           <li>Claude reads each post with the member’s district and the category definitions you picked, then gives it one category, a confidence level and a short reason. Posts go to Claude 25 at a time.</li>
           <li>One category per post keeps the shares adding up to 100%. A post that mixes legislative work with outrage goes wherever its main purpose points.</li>
           <li>Labels are judgments, not facts. Check the posts under Needs review and change anything you disagree with.</li>
-          <li>Labeling uses your own Claude usage, about one request per 25 posts. Your posts and labels are saved in this browser only.</li>
+          <li>Labeling runs on your own Claude account: your claude.ai plan when the page is opened inside claude.ai, or your Anthropic API key on the website. It takes about one request per 25 posts. Your posts and labels are saved in this browser only.</li>
         </ul>
       </section>
     </main>
@@ -676,7 +684,7 @@ var dlP = cap('downloads');
 // No window.claude means a plain web page (GitHub Pages, a local file): no Claude, but ordinary downloads work.
 var standalone = !window.claude;
 var NO_CLAUDE = standalone
-  ? 'Labeling with Claude works when this page is opened inside claude.ai. Here you can label posts by hand in the list below.'
+  ? 'Paste an Anthropic API key above to label posts with Claude, or label them by hand in the list below.'
   : 'Claude isn’t available in this view, so labeling is off. You can still label posts by hand in the list below.';
 var claudeState = 'pending'; // pending | ready | none
 var dl = null;
@@ -837,7 +845,7 @@ function prepare(list){
 }
 
 // ---------------------------------------------------------------- labeling
-function buildPrompt(batch){
+function buildPrompt(batch, shape){
   var m = state.member, ids = orderedActive();
   var lines = ids.map(function(id){ var c = cat(id); return '- ' + c.id + ': ' + c.name + '. ' + (c.desc || ''); });
   lines.push('- other: Other. Fits none of the categories above.');
@@ -861,8 +869,9 @@ function buildPrompt(batch){
     'Rules:',
     rules.join('\n'),
     '',
-    'Reply with only a JSON array holding one object per post, in the same order, like this:',
-    '[{"n":1,"c":"' + (ids[0] || 'other') + '","conf":"high","why":"Announces a bill the member introduced"}]',
+    shape === 'object'
+      ? 'Return a "labels" list with one entry per post, in the same order.'
+      : 'Reply with only a JSON array holding one object per post, in the same order, like this:\n[{"n":1,"c":"' + (ids[0] || 'other') + '","conf":"high","why":"Announces a bill the member introduced"}]',
     '"n" is the post number. "c" is a category id from the list. "conf" is "high", "medium" or "low". "why" is at most 12 words naming what in the post decided it.',
     '',
     'Posts (' + batch.length + '):',
@@ -894,8 +903,100 @@ function errCopy(code){
       return 'Claude isn’t available for this account here. You can still label posts by hand in the list.';
     case 'rate_limited': return 'Claude is busy or your usage limit was reached. Posts labeled so far are kept. Wait a minute, then select Label again.';
     case 'session_expired': return 'Your Claude session expired. Sign in again, then select Label again.';
+    case 'no_key': return 'Paste your Anthropic API key above first.';
+    case 'bad_key': return 'Anthropic didn’t accept that API key. Check it in the Anthropic Console and paste it again.';
+    case 'forbidden': return 'That API key isn’t allowed to use this model. Pick another model, or check the key in the Anthropic Console.';
+    case 'api_rate_limited': return 'Your API key hit Anthropic’s rate limit. Posts labeled so far are kept. Wait a minute, then select Label again.';
+    case 'bad_request': return 'Anthropic turned the request down. If your credit balance is low, add credit in the Anthropic Console. Posts labeled so far are kept.';
+    case 'network': return 'Couldn’t reach Anthropic. Check your connection, then select Label again. Posts labeled so far are kept.';
+    case 'sdk_missing': return 'Couldn’t load the Claude library. Open the page from its website address rather than a saved file.';
     default: return 'Lost the connection to Claude. Posts labeled so far are kept. Select Label again to continue.';
   }
+}
+// ---------------------------------------------------------------- labeling with an API key (website copy)
+var API_MODELS = {
+  'claude-haiku-4-5': {name:'Claude Haiku 4.5', note:'cheapest', inUSD:1, outUSD:5, effort:false, fallbacks:false},
+  'claude-sonnet-5-5': {name:'Claude Sonnet 5.5', note:'balanced', inUSD:2, outUSD:10, effort:true, fallbacks:true},
+  'claude-opus-5-5': {name:'Claude Opus 5.5', note:'most careful', inUSD:4, outUSD:20, effort:true, fallbacks:true}
+};
+var DEFAULT_API_MODEL = 'claude-opus-5-5';
+var KEY_STORE = 'congress-tweet-audit:anthropic-key';
+var apiKeyValue = '';
+try { apiKeyValue = localStorage.getItem(KEY_STORE) || ''; } catch (e) {}
+var apiSpend = {input:0, output:0};
+var sdkP = null;
+function apiKey(){ return apiKeyValue.trim(); }
+function apiModel(){ return API_MODELS[state.apiModel] ? state.apiModel : DEFAULT_API_MODEL; }
+function canLabel(){ return standalone ? !!apiKey() : claudeState !== 'none'; }
+function usd(x){ return x < 0.01 ? 'under 1¢' : '$' + (x < 10 ? x.toFixed(2) : fmtInt(x)); }
+function loadSDK(){
+  // A pinned copy of the official SDK served from this site (vendor/), so no third-party script runs next to the key.
+  if (!sdkP) sdkP = import('./vendor/anthropic-sdk-0.131.0.js').then(function(mod){ return mod.default; }, function(e){ sdkP = null; throw e; });
+  return sdkP;
+}
+function labelSchema(){
+  return {type:'object', additionalProperties:false, required:['labels'], properties:{
+    labels:{type:'array', items:{type:'object', additionalProperties:false, required:['n','c','conf','why'], properties:{
+      n:{type:'integer'},
+      c:{type:'string', enum:orderedActive().concat('other')},
+      conf:{type:'string', enum:['high','medium','low']},
+      why:{type:'string'}}}}}};
+}
+function estimateCost(targets){
+  var m = API_MODELS[apiModel()], inTok = 0, outTok = 0;
+  for (var i = 0; i < targets.length; i += BATCH) {
+    var b = targets.slice(i, i + BATCH);
+    inTok += buildPrompt(b, 'object').length / 3.2 + 250;  // rough: ~3.2 characters per token, plus the schema
+    outTok += b.length * 35 + (m.effort ? 400 : 0);         // labels, plus a little thinking on models that think
+  }
+  return (inTok * m.inUSD + outTok * m.outUSD) / 1e6;
+}
+function spentUSD(){ var m = API_MODELS[apiModel()]; return (apiSpend.input * m.inUSD + apiSpend.output * m.outUSD) / 1e6; }
+async function apiLabelBatch(client, batch, signal){
+  var id = apiModel(), m = API_MODELS[id];
+  var params = {model:id, max_tokens:16000, messages:[{role:'user', content:buildPrompt(batch, 'object')}],
+                output_config:{format:{type:'json_schema', schema:labelSchema()}}};
+  if (m.effort) params.output_config.effort = 'low';  // routine labeling: low effort keeps thinking, and cost, small
+  var res;
+  if (m.fallbacks) {
+    // If a safety classifier declines a batch, the API reruns it on Anthropic's recommended fallback model.
+    params.betas = ['server-side-fallback-2026-07-01'];
+    params.fallbacks = 'default';
+    res = await client.beta.messages.create(params, {signal:signal});
+  } else {
+    res = await client.messages.create(params, {signal:signal});
+  }
+  var u = res.usage || {};
+  apiSpend.input += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+  apiSpend.output += u.output_tokens || 0;
+  if (res.stop_reason === 'refusal') throw {code:'refused'};
+  if (res.stop_reason === 'max_tokens') throw {code:'invalid_json'};
+  var text = res.content.filter(function(b){ return b.type === 'text'; }).map(function(b){ return b.text; }).join('');
+  try { return JSON.parse(text); } catch (e) { throw {code:'invalid_json'}; }
+}
+function apiErrCode(e, A){
+  if (!(e instanceof A.APIError)) return (e && e.code) || 'upstream_error';
+  if (e instanceof A.APIUserAbortError) return 'cancelled';
+  if (e instanceof A.APIConnectionError) return 'network';
+  if (e instanceof A.AuthenticationError) return 'bad_key';
+  if (e instanceof A.PermissionDeniedError) return 'forbidden';
+  if (e instanceof A.RateLimitError) return 'api_rate_limited';
+  if (e instanceof A.BadRequestError) return 'bad_request';
+  return 'upstream_error';
+}
+async function getBackend(){
+  if (!standalone) {
+    var sample = await sampleP;
+    if (!sample) return null;
+    return {run:function(batch, signal){ return sample.json(buildPrompt(batch), {signal:signal, modelTier:state.tier}); },
+            code:function(e){ return e && e.code; }};
+  }
+  if (!apiKey()) return {error:'no_key'};
+  var A;
+  try { A = await loadSDK(); } catch (e) { return {error:'sdk_missing'}; }
+  var client = new A({apiKey:apiKey(), dangerouslyAllowBrowser:true});
+  return {run:function(batch, signal){ return apiLabelBatch(client, batch, signal); },
+          code:function(e){ return apiErrCode(e, A); }};
 }
 function targetsFor(mode){
   if (mode === 'missing') return state.tweets.filter(function(t){ return !lab(t); });
@@ -904,6 +1005,8 @@ function targetsFor(mode){
 function lockUI(on){
   $('#lock').disabled = on;
   $('#tier').disabled = on;
+  $('#api-key').disabled = on;
+  $('#api-remember').disabled = on;
   $('#label-btn').hidden = on;
   $('#label-run').hidden = !on;
   document.querySelectorAll('[data-label-action]').forEach(function(b){ b.disabled = on; });
@@ -922,12 +1025,14 @@ async function runLabel(mode){
   setLabelMsg('');
   running = true; lockUI(true);
   progress(0, targets.length, 'Connecting to Claude…');
-  var sample = await sampleP;
-  if (!sample) {
-    running = false; lockUI(false); claudeState = 'none'; renderLabelStep();
-    setLabelMsg(NO_CLAUDE, true);
+  var backend = await getBackend();
+  if (!backend || backend.error) {
+    running = false; lockUI(false);
+    if (!backend) { claudeState = 'none'; renderLabelStep(); }
+    setLabelMsg(backend ? errCopy(backend.error) : NO_CLAUDE, true);
     return;
   }
+  apiSpend = {input:0, output:0};
   ctl = new AbortController();
   var signal = ctl.signal, sig = signature(), total = targets.length, done = 0, got = 0, stopMsg = '';
   progress(0, total, 'Waiting for Claude…');
@@ -935,10 +1040,10 @@ async function runLabel(mode){
     if (signal.aborted) break;
     var batch = targets.slice(i, i + BATCH);
     try {
-      var res = await sample.json(buildPrompt(batch), {signal:signal, modelTier:state.tier});
+      var res = await backend.run(batch, signal);
       got += applyResult(batch, res, sig);
     } catch (e) {
-      var code = e && e.code;
+      var code = backend.code(e);
       if (code === 'cancelled') break;
       if (code !== 'refused' && code !== 'invalid_json' && code !== 'empty_completion') { stopMsg = errCopy(code); break; }
     }
@@ -949,10 +1054,12 @@ async function runLabel(mode){
   var stopped = signal.aborted;
   running = false; ctl = null; lockUI(false);
   var missed = total - got;
+  var spent = standalone && (apiSpend.input || apiSpend.output) ? ' This run cost about ' + usd(spentUSD()) + ' on your API key.' : '';
   if (stopMsg) setLabelMsg((got ? 'Labeled ' + plural(got, 'post') + '. ' : '') + stopMsg, true);
   else if (stopped) setLabelMsg('Stopped after ' + plural(got, 'post') + '. The rest keep their old label or stay unlabeled.');
   else if (missed > 0) setLabelMsg('Labeled ' + plural(got, 'post') + '. ' + plural(missed, 'post') + ' came back without a usable label; select Label again to retry them.', true);
   else setLabelMsg('Labeled ' + plural(got, 'post') + '.');
+  if (spent) $('#label-msg').append(spent);
   renderAll();
 }
 
@@ -1075,10 +1182,21 @@ function renderLabelStep(){
   btn.dataset.mode = missing ? 'missing' : 'all';
   btn.textContent = missing ? 'Label ' + plural(missing, 'post') + ' with Claude'
                             : 'Re-label ' + (state.sample ? 'the ' + plural(all, 'sample post') : 'all ' + plural(all, 'post'));
-  btn.disabled = !n || claudeState === 'none';
-  if (claudeState === 'none') cost.textContent = NO_CLAUDE;
-  else cost.textContent = n ? 'Uses your Claude plan: about ' + plural(Math.ceil(n / BATCH), 'request') + '.' + (!missing ? ' Posts you labeled by hand keep your label.' : '') : '';
-  $('#tier').value = state.tier;
+  btn.disabled = !n || !canLabel();
+  var keepNote = !missing ? ' Posts you labeled by hand keep your label.' : '';
+  if (!canLabel()) cost.textContent = NO_CLAUDE;
+  else if (!n) cost.textContent = '';
+  else if (standalone) cost.textContent = 'Rough cost: ' + usd(estimateCost(targetsFor(btn.dataset.mode))) + ' on ' + API_MODELS[apiModel()].name +
+    ' for ' + plural(n, 'post') + ' (' + plural(Math.ceil(n / BATCH), 'request') + '), billed to your Anthropic account.' + keepNote;
+  else cost.textContent = 'Uses your Claude plan: about ' + plural(Math.ceil(n / BATCH), 'request') + '.' + keepNote;
+  var sel = $('#tier');
+  if (standalone && sel.dataset.mode !== 'api') {
+    sel.replaceChildren.apply(sel, Object.keys(API_MODELS).map(function(id){
+      return h('option', {value:id, text:API_MODELS[id].name + ' · ' + API_MODELS[id].note});
+    }));
+    sel.dataset.mode = 'api';
+  }
+  sel.value = standalone ? apiModel() : state.tier;
 }
 
 // ---------------------------------------------------------------- render: report
@@ -1099,14 +1217,14 @@ function renderBanners(){
   if (missing && labeled) {
     host.append(h('div', {class:'banner'},
       h('p', {text:plural(missing, 'post') + (missing === 1 ? ' doesn’t' : ' don’t') + ' have a label yet, so the charts leave ' + (missing === 1 ? 'it' : 'them') + ' out.'}),
-      h('button', {class:'btn primary small', type:'button', 'data-label-action':'', text:'Label ' + plural(missing, 'post'), disabled:claudeState === 'none',
+      h('button', {class:'btn primary small', type:'button', 'data-label-action':'', text:'Label ' + plural(missing, 'post'), disabled:!canLabel(),
         onclick:function(){ runLabel('missing'); }})));
   }
   var stale = staleNames();
   if (stale.length) {
     host.append(h('div', {class:'banner'},
       h('p', {text:'You added ' + stale.join(', ') + ' after these posts were labeled. Re-label so Claude can use ' + (stale.length === 1 ? 'it' : 'them') + '.'}),
-      h('button', {class:'btn primary small', type:'button', 'data-label-action':'', text:'Re-label all posts', disabled:claudeState === 'none',
+      h('button', {class:'btn primary small', type:'button', 'data-label-action':'', text:'Re-label all posts', disabled:!canLabel(),
         onclick:function(){ runLabel('all'); }})));
   }
 }
@@ -1143,7 +1261,7 @@ function renderReport(){
       $('#empty-title').textContent = plural(state.tweets.length, 'post') + ' ready to label';
       $('#empty-text').textContent = 'Claude reads each post and gives it one of your categories. The breakdown, timeline and engagement charts fill in as batches finish. You can also label posts by hand in the list below.';
       eb.hidden = false; eb.textContent = 'Label ' + plural(state.tweets.length, 'post') + ' with Claude';
-      eb.disabled = running || claudeState === 'none';
+      eb.disabled = running || !canLabel();
       eb.setAttribute('data-label-action', '');
     }
   } else {
@@ -1571,7 +1689,26 @@ function renderAll(){ renderCats(); renderRange(); renderReport(); }
 $('#m-name').addEventListener('input', function(e){ state.member.name = e.target.value; save(); renderMast(); });
 $('#m-district').addEventListener('input', function(e){ state.member.district = e.target.value; save(); renderMast(); });
 $('#skip-rt').addEventListener('change', function(e){ state.skipRT = e.target.checked; save(); });
-$('#tier').addEventListener('change', function(e){ state.tier = e.target.value; save(); });
+$('#tier').addEventListener('change', function(e){
+  if (standalone) state.apiModel = e.target.value; else state.tier = e.target.value;
+  save(); renderLabelStep();
+});
+function storeKey(){
+  try {
+    if ($('#api-remember').checked && apiKey()) localStorage.setItem(KEY_STORE, apiKey());
+    else localStorage.removeItem(KEY_STORE);
+  } catch (e) {}
+}
+$('#api-key').addEventListener('input', function(e){
+  apiKeyValue = e.target.value; storeKey();
+  if (!running) { renderLabelStep(); renderBanners(); renderReportEmptyButton(); }
+});
+$('#api-remember').addEventListener('change', storeKey);
+if (standalone) {
+  $('#api-block').hidden = false;
+  $('#api-key').value = apiKeyValue;
+  $('#api-remember').checked = !!apiKeyValue;
+}
 $('#load-btn').addEventListener('click', function(){
   var text = $('#paste').value;
   if (!text.trim()) { setStatus('Paste some posts first, or upload a file.', true); $('#paste').focus(); return; }
@@ -1663,7 +1800,7 @@ if (typeof ResizeObserver === 'function') {
 
 sampleP.then(function(s){ claudeState = s ? 'ready' : 'none'; if (!running) { renderLabelStep(); renderBanners(); renderReportEmptyButton(); } });
 dlP.then(function(d){ dl = d; renderMast(); });
-function renderReportEmptyButton(){ var eb = $('#empty-btn'); if (!eb.hidden) eb.disabled = claudeState === 'none'; }
+function renderReportEmptyButton(){ var eb = $('#empty-btn'); if (!eb.hidden) eb.disabled = running || !canLabel(); }
 
 syncInputs();
 renderAll();
