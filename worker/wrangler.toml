@@ -1,0 +1,11 @@
+# Deploy with: npx wrangler deploy  (from this folder)
+# Then add the two secrets:
+#   npx wrangler secret put X_BEARER_TOKEN
+#   npx wrangler secret put ACCESS_CODE
+name = "congress-x-fetch"
+main = "x-fetch.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://techymara.github.io"
+MAX_POSTS = "1000"

@@ -1,0 +1,7 @@
+# Posts saved by tools/fetch_posts.py stay on your computer: republishing them goes against X's rules.
+*-x.json
+*-bluesky.json
+# Cloudflare Worker tooling
+worker/node_modules/
+worker/.wrangler/
+__pycache__/
